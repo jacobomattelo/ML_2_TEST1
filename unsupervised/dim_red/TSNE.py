@@ -1,7 +1,7 @@
 import numpy as np
 
 class TSNE:
-    def __init__(self, n_components, perplexity=30.0, learning_rate=200.0, n_iter=1000):
+    def __init__(self, n_components, perplexity=30.0, learning_rate=200.0, n_iter=300):
         self.n_components = n_components
         self.perplexity = perplexity
         self.learning_rate = learning_rate
@@ -34,7 +34,7 @@ class TSNE:
         Y = np.random.randn(X.shape[0], self.n_components)
 
         # Compute pairwise probability matrix P for a subset of points
-        num_samples = min(1000, X.shape[0])  # Limit the number of samples to reduce memory usage
+        num_samples = min(100, X.shape[0])  # Limit the number of samples to reduce memory usage
         indices = np.random.choice(X.shape[0], num_samples, replace=False)
         X_subset = X[indices]
 

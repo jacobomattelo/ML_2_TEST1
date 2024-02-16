@@ -8,6 +8,7 @@ numpy = "*"
 matplotlib = "*"
 scikit-learn = "*"
 pillow = "*"
+seaborn = "*"
 
 [dev-packages]
 
