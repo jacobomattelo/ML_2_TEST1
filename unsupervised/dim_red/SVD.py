@@ -42,3 +42,10 @@ class SVD:
         X_reconstructed = np.dot(X, self.components) + self.mean
 
         return X_reconstructed
+
+    def fit_transform(self, X):
+        # first fit the model to the data
+        self.fit(X)
+
+        # then transform the data
+        return self.transform(X)

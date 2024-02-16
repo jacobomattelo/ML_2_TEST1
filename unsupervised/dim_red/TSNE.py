@@ -1,72 +1,81 @@
 import numpy as np
 
 class TSNE:
-    def __init__(self, n_components, perplexity=30.0, learning_rate=100.0, n_iter=1000, random_state=None):
+    def __init__(self, n_components, perplexity=30.0, learning_rate=200.0, n_iter=1000):
         self.n_components = n_components
         self.perplexity = perplexity
         self.learning_rate = learning_rate
         self.n_iter = n_iter
-        self.random_state = random_state
         self.embedding = None
 
-    def fit(self, X):
-        # Initialize embedding randomly or based on random state
-        if self.random_state is not None:
-            np.random.seed(self.random_state)
-        self.embedding = np.random.normal(0., 1e-4, (X.shape[0], self.n_components))
+    def _symmetric_sne(self, P):
+        # Compute symmetric SNE probability matrix Q
+        Q = 1 / (1 + np.sum((P[:, None, :] - P[None, :, :]) ** 2, axis=-1) / self.perplexity)
+        np.fill_diagonal(Q, 0)
+        Q /= np.sum(Q)
+        return Q
 
-        # Compute pairwise distances
-        pairwise_distances = self._pairwise_distances(X)
-
-        # Compute pairwise similarities using a Gaussian kernel
-        P = self._joint_probabilities(pairwise_distances)
-
-        # Initialize low-dimensional representation randomly
-        Y = np.random.normal(0., 1e-4, (X.shape[0], self.n_components))
-
-        # Perform gradient descent
-        for _ in range(self.n_iter):
-            # Compute Q distribution
-            Q = self._student_t_distribution(Y)
-
-            # Compute gradient
-            grad = self._gradient(P, Q, Y)
-
-            # Update embedding
-            Y -= self.learning_rate * grad
-
-        self.embedding = Y
-
-    def transform(self, X):
-        return self.embedding
-
-    def fit_transform(self, X):
-        self.fit(X)
-        return self.transform(X)
-
-    def _pairwise_distances(self, X):
-        return np.sum((X[:, np.newaxis, :] - X[np.newaxis, :, :]) ** 2, axis=-1)
-
-    def _joint_probabilities(self, distances):
-        # Compute conditional probabilities using perplexity
-        P = np.exp(-distances * self.perplexity)
-        P /= np.sum(P, axis=1, keepdims=True)
-        P = (P + P.T) / (2. * distances.shape[0])  # Symmetrize
-        return np.maximum(P, 1e-12)
-
-    def _student_t_distribution(self, Y):
-        distances = self._pairwise_distances(Y)
-        inv_distances = 1. / (1. + distances)
-        np.fill_diagonal(inv_distances, 0.)
-        return inv_distances / np.sum(inv_distances, axis=1, keepdims=True)
-
-    def _gradient(self, P, Q, Y):
-        # Compute gradient using the t-SNE formula
+    def _gradient(self, X, P, Q, Y):
+        # Compute gradient of t-SNE cost function
         pq_diff = P - Q
         grad = np.zeros_like(Y)
-        for i in range(Y.shape[0]):
-            grad[i] = 4. * np.sum(
-                (pq_diff[i] * (Y[i, np.newaxis] - Y)) *
-                (1. - np.sqrt(np.sum((Y[i, np.newaxis] - Y) ** 2, axis=1)))[:, np.newaxis],
-                axis=0)
+        for i in range(len(Y)):
+            grad[i, :] = np.sum((pq_diff[:, i] * (Y[i, :] - Y)), axis=0)
+        grad *= 4
+        grad -= 2 * self.learning_rate * np.sum((1 / (1 + np.sum((X[:, None, :] - X[None, :, :]) ** 2, axis=-1)))[:, :, None] * (Y[:, None, :] - Y), axis=0)
         return grad
+
+    def _kl_divergence(self, P, Q):
+        # Compute KL divergence between P and Q
+        return np.sum(P * np.log(P / Q))
+
+    def _tsne(self, X):
+        # Initialize Y randomly
+        Y = np.random.randn(X.shape[0], self.n_components)
+
+        # Compute pairwise probability matrix P for a subset of points
+        num_samples = min(1000, X.shape[0])  # Limit the number of samples to reduce memory usage
+        indices = np.random.choice(X.shape[0], num_samples, replace=False)
+        X_subset = X[indices]
+
+        P = np.zeros((num_samples, num_samples))
+        for i in range(num_samples):
+            distances = np.sum((X_subset[i, :] - X_subset) ** 2, axis=1)
+            P[i, :] = self._conditional_probabilities(distances, i)
+        P = (P + P.T) / (2 * num_samples)
+
+        # Train t-SNE using gradient descent
+        for _ in range(self.n_iter):
+            Q = self._symmetric_sne(P)
+            grad = self._gradient(X, P, Q, Y)
+            Y -= self.learning_rate * grad
+            P = self._symmetric_sne(Y)
+
+        return Y
+
+    def _conditional_probabilities(self, distances, i):
+        # Compute conditional probabilities using binary search
+        beta_min, beta_max = -np.inf, np.inf
+        tol = 1e-5
+        target_entropy = np.log(self.perplexity)
+
+        while True:
+            beta = (beta_min + beta_max) / 2
+            exp_distances = np.exp(-beta * distances)
+            sum_exp_distances = np.sum(exp_distances)
+            P = exp_distances / sum_exp_distances
+            entropy = -np.sum(P * np.log2(P + 1e-12))
+            error = entropy - target_entropy
+
+            if np.abs(error) < tol:
+                break
+            elif error > 0:
+                beta_max = beta
+            else:
+                beta_min = beta
+
+        return P
+
+    def fit_transform(self, X):
+        self.embedding = self._tsne(X)
+        return self.embedding
